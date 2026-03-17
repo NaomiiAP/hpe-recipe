@@ -24,8 +24,8 @@ pipeline {
             steps {
                 script {
                     def chartYaml = readFile("${CHART_DIR}/Chart.yaml")
-                    def versionMatch = chartYaml =~ /version:\s*(.+)/
-                    env.CHART_VERSION = versionMatch[0][1].trim()
+                    def versionLine = chartYaml.readLines().find { it.startsWith('version:') }
+                    env.CHART_VERSION = versionLine.split(':')[1].trim()
                     env.IMAGE_TAG = env.CHART_VERSION
                     env.RELEASE_NAME = "recipe-v${env.CHART_VERSION.replace('.', '-')}"
 
