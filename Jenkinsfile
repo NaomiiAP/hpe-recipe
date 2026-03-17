@@ -4,7 +4,7 @@ pipeline {
     tools {
         maven 'Maven3'
     }
-    
+
     environment {
         CHART_DIR       = 'helm/recipe-detection-chart'
         IMAGE_NAME      = 'hpe-recipe-detection'
@@ -23,14 +23,19 @@ pipeline {
         stage('Determine Chart Version') {
             steps {
                 script {
-                    // Read chart version from Chart.yaml
                     def chartYaml = readFile("${CHART_DIR}/Chart.yaml")
                     def versionMatch = chartYaml =~ /version:\s*(.+)/
                     env.CHART_VERSION = versionMatch[0][1].trim()
                     env.IMAGE_TAG = env.CHART_VERSION
                     env.RELEASE_NAME = "recipe-v${env.CHART_VERSION.replace('.', '-')}"
+
+                    // Check for per-version values file
+                    env.VALUES_FILE = "${CHART_DIR}/values-v${env.CHART_VERSION}.yaml"
+                    env.HAS_VERSION_VALUES = fileExists(env.VALUES_FILE) ? 'true' : 'false'
+
                     echo "Chart Version: ${env.CHART_VERSION}"
                     echo "Release Name: ${env.RELEASE_NAME}"
+                    echo "Values file: ${env.VALUES_FILE} (exists: ${env.HAS_VERSION_VALUES})"
                 }
             }
         }
@@ -46,7 +51,6 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Build image and load into minikube
                     bat "minikube image build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
                 }
             }
@@ -55,7 +59,9 @@ pipeline {
         stage('Deploy to Minikube') {
             steps {
                 script {
-                    // Check if release already exists
+                    def valuesArg = env.HAS_VERSION_VALUES == 'true'
+                        ? "-f ${env.VALUES_FILE}" : ""
+
                     def releaseExists = bat(
                         script: "${HELM_CMD} status ${RELEASE_NAME} --namespace ${KUBE_NAMESPACE} 2>nul",
                         returnStatus: true
@@ -65,14 +71,18 @@ pipeline {
                         bat """
                             ${HELM_CMD} upgrade ${RELEASE_NAME} ${CHART_DIR} \
                                 --namespace ${KUBE_NAMESPACE} \
-                                --set image.tag=${IMAGE_TAG}
+                                ${valuesArg} \
+                                --set image.tag=${IMAGE_TAG} \
+                                --set image.pullPolicy=Never
                         """
                         echo "Upgraded Helm release: ${RELEASE_NAME}"
                     } else {
                         bat """
                             ${HELM_CMD} install ${RELEASE_NAME} ${CHART_DIR} \
                                 --namespace ${KUBE_NAMESPACE} \
-                                --set image.tag=${IMAGE_TAG}
+                                ${valuesArg} \
+                                --set image.tag=${IMAGE_TAG} \
+                                --set image.pullPolicy=Never
                         """
                         echo "Installed new Helm release: ${RELEASE_NAME}"
                     }
@@ -83,10 +93,8 @@ pipeline {
         stage('Verify Deployment') {
             steps {
                 script {
-                    // Wait for rollout to complete
                     bat "kubectl rollout status deployment/${RELEASE_NAME}-recipe-detection --namespace ${KUBE_NAMESPACE} --timeout=120s"
 
-                    // Show deployment status
                     bat "${HELM_CMD} list --namespace ${KUBE_NAMESPACE}"
                     bat "kubectl get pods --namespace ${KUBE_NAMESPACE} -l app.kubernetes.io/instance=${RELEASE_NAME}"
                     bat "kubectl get configmaps --namespace ${KUBE_NAMESPACE} -l app.kubernetes.io/instance=${RELEASE_NAME}"
@@ -97,7 +105,6 @@ pipeline {
         stage('Update Release Status') {
             steps {
                 script {
-                    // Tell the Recipe Detection API that this version is now deployed
                     bat """
                         curl -s -X PUT ${API_URL}/helm-releases/${env.CHART_VERSION}/status ^
                             -H "Content-Type: application/json" ^
@@ -115,7 +122,6 @@ pipeline {
         }
         failure {
             script {
-                // Mark as failed in the API
                 bat """
                     curl -s -X PUT ${API_URL}/helm-releases/${env.CHART_VERSION}/status ^
                         -H "Content-Type: application/json" ^

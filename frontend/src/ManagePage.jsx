@@ -342,7 +342,21 @@ function ReleaseCard({ release, onRefresh, onNotify }) {
   };
 
   const recipes = detail?.recipes || [];
-  const statusColor = release.status === 'deployed' ? T.green : release.status === 'failed' ? T.red : T.yellow;
+  const statusColor = release.status === 'deployed' ? T.green
+    : release.status === 'failed' || release.status === 'push_failed' ? T.red
+    : release.status === 'deploying' ? T.blue
+    : T.yellow;
+
+  const handleDeploy = () => {
+    if (!window.confirm(`Deploy Helm release ${release.version}? This will push to Git and trigger Jenkins.`)) return;
+    fetch(`${API_BASE}/helm-releases/${release.version}/deploy`, { method: 'POST' })
+      .then((r) => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.error || 'Deploy failed'); });
+        return r.json();
+      })
+      .then((data) => onNotify(data.message))
+      .catch((err) => onNotify(err.message, true));
+  };
 
   return (
     <div style={{
@@ -380,7 +394,28 @@ function ReleaseCard({ release, onRefresh, onNotify }) {
             transition: 'transform 0.2s',
           }}>▼</span>
         </div>
-        <button onClick={handleDeleteRelease} style={{ ...btnDanger, marginLeft: 12 }}>Delete</button>
+        <div style={{ display: 'flex', gap: 8, marginLeft: 12 }}>
+          {(release.status === 'pending' || release.status === 'push_failed') && (
+            <button onClick={handleDeploy} style={{
+              ...btnPrimary, padding: '6px 14px', fontSize: 12,
+            }}>Deploy</button>
+          )}
+          {release.status === 'deploying' && (
+            <span style={{
+              padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+              background: `${T.blue}18`, color: T.blue, border: `1px solid ${T.blue}44`,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%', background: T.blue,
+                animation: 'pulse 1s infinite',
+              }} />
+              Deploying...
+              <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
+            </span>
+          )}
+          <button onClick={handleDeleteRelease} style={btnDanger}>Delete</button>
+        </div>
       </div>
 
       {/* Expanded content */}

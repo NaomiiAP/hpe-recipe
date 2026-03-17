@@ -12,3 +12,11 @@ management:
     web:
       exposure:
         include: health,info
+
+gitops:
+  repo-url: https://github.com/NaomiiAP/hpe-recipe.git
+  local-path: ${java.io.tmpdir}/hpe-recipe-gitops
+  branch: main
+  username: ${GIT_USERNAME:NaomiiAP}
+  token: ${GIT_TOKEN:}
+  values-dir: helm/recipe-detection-chart

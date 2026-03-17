@@ -3,6 +3,7 @@ package com.hpe.recipe.controller;
 import com.hpe.recipe.config.ReleaseWebSocketHandler;
 import com.hpe.recipe.model.HelmRelease;
 import com.hpe.recipe.model.Recipe;
+import com.hpe.recipe.service.GitOpsService;
 import com.hpe.recipe.service.HelmReleaseService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,11 +18,14 @@ public class HelmReleaseController {
 
     private final HelmReleaseService helmReleaseService;
     private final ReleaseWebSocketHandler wsHandler;
+    private final GitOpsService gitOpsService;
 
     public HelmReleaseController(HelmReleaseService helmReleaseService,
-                                  ReleaseWebSocketHandler wsHandler) {
+                                  ReleaseWebSocketHandler wsHandler,
+                                  GitOpsService gitOpsService) {
         this.helmReleaseService = helmReleaseService;
         this.wsHandler = wsHandler;
+        this.gitOpsService = gitOpsService;
     }
 
     @GetMapping
@@ -73,6 +77,33 @@ public class HelmReleaseController {
         release.setStatus(status);
         wsHandler.broadcast("status_changed", Map.of("version", version, "status", status));
         return ResponseEntity.ok(release);
+    }
+
+    @PostMapping("/{version}/deploy")
+    public ResponseEntity<?> deployRelease(@PathVariable String version) {
+        HelmRelease release = helmReleaseService.getHelmRelease(version);
+        if (release == null) return ResponseEntity.notFound().build();
+        if (release.getRecipes() == null || release.getRecipes().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Cannot deploy a release with no recipes"));
+        }
+
+        // Set status to deploying
+        release.setStatus("deploying");
+        wsHandler.broadcast("status_changed", Map.of("version", version, "status", "deploying"));
+
+        try {
+            gitOpsService.generateAndPush(release);
+            return ResponseEntity.ok(Map.of(
+                    "message", "Pushed to Git. Jenkins will deploy shortly.",
+                    "version", version
+            ));
+        } catch (Exception e) {
+            release.setStatus("push_failed");
+            wsHandler.broadcast("status_changed", Map.of("version", version, "status", "push_failed"));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Git push failed: " + e.getMessage()));
+        }
     }
 
     @DeleteMapping("/{version}")
