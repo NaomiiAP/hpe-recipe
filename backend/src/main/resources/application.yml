@@ -1,0 +1,21 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: recipe-detection-api
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+# Custom application properties
+app:
+  kubernetes:
+    namespace: default
+    configmap-label-selector: "app.kubernetes.io/name=recipe-data"
