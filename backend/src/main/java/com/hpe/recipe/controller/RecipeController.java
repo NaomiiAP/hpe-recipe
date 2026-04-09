@@ -1,6 +1,5 @@
 package com.hpe.recipe.controller;
 
-import com.hpe.recipe.model.Recipe;
 import com.hpe.recipe.service.CatalogService;
 import org.springframework.web.bind.annotation.*;
 
